@@ -10,14 +10,19 @@ institute: "JSM 2024 Portland, Oregon"
 #   data-background-position: "75% 53%"
 format: 
   revealjs:
-    slide-number: "c/t"
+    scrollable: true
+    slide-number: true
     show-slide-number: all
-    controls: true
+    aspectratio: 169
     theme: serif
+    preview-links: auto
+    multiplex: true
+    pdf-separate-fragments: true
+    css: style.css
+    footer: "https://sherryzhang-jsm2024.netlify.app"
 execute:
   echo: true
 self-contained: true
-css: style.css
 ---
 
 ```{r setup, include=FALSE}
@@ -106,7 +111,7 @@ The game is on this week, but 1/4am PT `r set.seed(1234); emo::ji("sad")`...
 ![](figures/workflow.png){.fragment height="500" width="1000"}
 :::
 
-## A closer look at a class of drought indexes {background-image="figures/index-overview.png" background-size="65%" background-position="bottom"}
+## [A closer look at a class of drought indexes]{.r-fit-text} {background-image="figures/index-overview.png" background-size="65%" background-position="50% 60%"}
 
 ::: notes
 The most commonly used drought index is called SPI,
@@ -184,6 +189,52 @@ The `aggregate_*()` function can be evaluated as a standalone recipe, before eva
 aggregate_manual(~x1 + x2)
 ```
 
+## Pipeline for two drought indexes 
+
+::: panel-tabset
+### SPI
+
+```{r}
+#| eval: false
+#| echo: true
+data %>%                         # data contain `prcp`
+  aggregate(                     # step 1: temporal aggregation
+    .var = prcp,                 #         aggregate `prcp` with time scale
+    .scale = .scale) %>%         #         to create `.agg`, by default
+  dist_fit(.dist = .dist,        # step 2: distribution fit
+           .method = "lmoms",    #         using L-moment to fit `.dist`
+           .var = .agg) %>%      #         distribution on `.agg`
+  augment(.var = .agg)           # step 3: normalising 
+                                 #         find the normal density for `.agg`
+```
+
+### SPEI
+
+```{r}
+#| eval: false
+#| echo: true
+data %>%                                  # data contain `tavg` and `prcp`
+  var_trans(                              # step 1: variable transformation
+    .method = "thornthwaite",             #         using the thornthwaite function
+    .vars = tavg,                         #         on `tavg` 
+    .new_name = "pet") %>%                #         to create a new variable `pet` 
+  dim_red(diff = prcp - pet) %>%          # step 2: dimension reduction 
+  aggregate(                              # step 3: temporal aggregation
+    .var = diff,                          #         aggregate `diff` with time scale
+    .scale = .scale) %>%                  #         `.scale` to create `.agg`
+  dist_fit(                               # step 4: distribution fit
+    .dist = dist_gev(),                   #         use the gev distribution 
+    .var = .agg,                          #         to fit the variable `.agg`
+    .method = "lmoms") %>%                #         using L-moment        
+  augment(.var = .agg)                    # step 5: normalising 
+                                          #         find the normal density for `.agg`
+```
+:::
+
+::: notes
+What we built with the tidyindex package are the pieces aggregate for temporal aggregation, dist_fit for fitting distribution, and augment for normalising. Users can compose their indexes from the module developed. Also we provide some wrapper for commonly used indexes, for example, the SPI and SPEI with some default parameters.
+:::
+
 ## Confidence interval in the SPI {.smaller}
 
 A bootstrap sample of 100 is taken from the aggregated precipitation series to estimate gamma parameters and to calculate the index SPI for the *Texas Post Office* station in Queensland.
@@ -231,144 +282,8 @@ DATA %>%
 
 ![80% and 95% confidence interval of the Standardized Precipitation Index (SPI-24) for the Texas post office station, in Queensland, Australia. The dashed line at SPI = -2 represents an extreme drought as defined by the SPI. Most parts of the confidence intervals from 2019 to 2020 sit below the extreme drought line and are relatively wide compared to other time periods. This suggests that while it is certain that the Texas post office is suffering from a drastic drought, there is considerable uncertainty in quantifying its severity, given the extremity of the event.](figures/fig-conf-interval-1.png){width="1000" height="300"}
 
-## Pipeline for two drought indexes
 
-::: panel-tabset
-### SPI
-
-```{r}
-#| eval: false
-#| echo: true
-idx_spi <- function(.scale, .dist, ...){
-  ...
-  data %>%                            # data contain `prcp`
-    aggregate(.var = prcp,            # step 1: temporal aggregation
-              .scale = .scale)%>%     #         aggregate `prcp` with time scale    
-                                      #         `.scale` to create `.agg`, by default
-    dist_fit(.dist = .dist,           # step 2: distribution fit
-             .method = "lmoms",       #         using L-moment to fit `.dist`
-             .var = .agg) %>%         #         distribution on `.agg`
-    augment(.var = .agg)              # step 3: normalising 
-                                      #         find the normal density for `.agg`
-}
-```
-
-### SPEI
-
-```{r}
-#| eval: false
-#| echo: true
-idx_spei <- function(.scale, .dist, ...){
-  ...
-  data %>%                                  # data contain `tavg` and `prcp`
-    var_trans(                              # step 1: variable transformation
-      .method = "thornthwaite",             #         using the thornthwaite function
-      .vars = tavg, .new_name = "pet") %>%  #         on `tavg` to create `pet`
-    dim_red(diff = prcp - pet) %>%          # step 2: dimension reduction 
-    aggregate(                              # step 3: temporal aggregation
-      .var = diff,                          #         aggregate `diff` with time scale
-      .scale = .scale) %>%                  #         `.scale` to create `.agg`
-    dist_fit(                               # step 4: distribution fit
-      .dist = .dist, .method = "lmoms",     #         using L-moment to fit `.dist`
-      .var = .agg) %>%                      #         distribution on `.agg`
-    augment(.var = .agg)                    # step 5: normalising 
-                                            #         find the normal density for `.agg`
-}
-```
-:::
-
-::: notes
-What we built with the tidyindex package are the pieces aggregate for temporal aggregation, dist_fit for fitting distribution, and augment for normalising. Users can compose their indexes from the module developed. Also we provide some wrapper for commonly used indexes, for example, the SPI and SPEI with some default parameters.
-:::
-
-## Example
-
-```{r echo = TRUE, message = FALSE}
-.scale <- c(6, 12, 24, 36)
-(idx <- queensland %>%
-  mutate(month = lubridate::month(ym)) |>
-  init(id = id, time = ym, group = month) |> 
-  compute_indexes(
-    spei = idx_spei(
-      .tavg = tavg, .lat = lat, 
-      .scale = .scale, .dist = list(dist_gev(), dist_glo())),
-    spi = idx_spi(.scale = .scale)
-  ))
-```
-
-::: notes
-A common task for drought index analyst is to compute a collection of drought indexes. Because drought can be characterised in different ways, analysts usually consider a range of their preferred indexes before making an announce on the situation.
-:::
-
-## 2010 Queensland flood & 2019-20 Australia drought
-
-```{r}
-library(sf)
-qld_lga <- strayr::read_absmap("lga2018")%>%
-  filter(state_name_2016 == "Queensland") %>%
-  rmapshaper::ms_simplify(keep = 0.3) %>%
-  mutate(lga_name_2018 = str_replace(lga_name_2018, " \\([S|R|C|]\\)", ""),
-         lga_name_2018 = str_replace(lga_name_2018, " \\(Qld\\)", ""))
-```
-
-```{r drought-spatial}
-queensland_map <- ozmaps::abs_ste %>% filter(NAME == "Queensland") %>% 
-  rmapshaper::ms_simplify(keep = 0.02)
-queensland_map %>%
-  ggplot() +
-  geom_sf(fill = "transparent", color = "grey50", linewidth = 0.4) +
-  geom_point(
-    data = idx %>%
-      filter(.idx == "spi", .scale == 12) %>%
-      filter(((year(ym) %in% c(2010, 2019) & month(ym) >= 10) )|
-               ((year(ym) %in% c(2011, 2020) & month(ym) <= 3) )), 
-    aes(x = long, y = lat, color = .index)) +
-  colorspace::scale_color_continuous_divergingx(palette = "Geyser", rev = TRUE, name = "Index") + 
-  theme_void() +
-  facet_wrap(vars(ym), ncol = 6)
-```
-
-::: notes
-:::
-
-## [All time scales agree on an extreme drought in 2019-20 bushfire season]{.r-fit-text}
-
-```{r drought-temporal}
-texas <- idx %>%
-    filter(name == "TEXAS POST OFFICE", .idx == "spei") %>% distinct(long, lat)
-p1 <- queensland_map %>%
-  ggplot() +
-  geom_sf(fill = "transparent") +
-  geom_point(data = queensland %>%
-               distinct(id, long, lat, name),
-             aes(x = long, y = lat)) +
-  geom_point(data = texas, aes(x = long, y = lat),
-             color = "orange", shape = 18, fill = "orange", size = 4) +  
-  theme_void()
-
-
-p2 <- idx %>%
-  filter(name == "TEXAS POST OFFICE", .idx == "spei") %>%
-  rename(scale = .scale) %>% 
-  ggplot(aes(x = ym, y = .index, color = .dist, group = .dist)) +
-  geom_line() +
-  theme_benchmark() +
-  facet_wrap(vars(scale), labeller = label_both, ncol = 1) +
-  scale_x_yearmonth(breaks = "2 year", date_labels = "%Y") +
-  scale_color_brewer(palette = "Dark2", name = "Distribution") + 
-  xlab("Year") + 
-  ylab("Index")
-
-(p1 | p2)  + 
-  patchwork::plot_annotation(tag_levels = "a") + 
-  patchwork::plot_layout(guides = "collect")  &
-  theme(legend.position = "bottom") 
-```
-
-::: notes
-:::
-
-##  {.smaller background-image="figures/gggi-weight.png" background-size="55%" background-position="right"}
+## Global Gender Gap Index{.smaller background-image="figures/gggi-weight.png" background-size="50%" background-position="90% 55%"}
 
 ::: {layout-ncol="2"}
 ![](figures/gggi.png){height="600," width="400"}
